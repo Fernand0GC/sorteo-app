@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { Settings, Play, X, Trophy, AlertTriangle } from 'lucide-react';
+import { Settings, Play, X, Trophy, AlertTriangle, Upload, Users, Trash2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import confetti from 'canvas-confetti';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
+import * as XLSX from 'xlsx';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -76,7 +77,7 @@ const CircuitBackground = () => {
   );
 };
 
-const Reel = ({ targetDigit, isSpinning, spinTime, delay, fontFamily }: { targetDigit: string, isSpinning: boolean, spinTime: number, delay: number, fontFamily: string }) => {
+const Reel = ({ targetDigit, isSpinning, spinTime, delay, fontFamily }: { key?: React.Key, targetDigit: string, isSpinning: boolean, spinTime: number, delay: number, fontFamily: string }) => {
   const digits = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
   // Create a long strip of digits for the spinning effect
   const strip = [...digits, ...digits, ...digits, ...digits, ...digits, ...digits];
@@ -122,7 +123,7 @@ const Reel = ({ targetDigit, isSpinning, spinTime, delay, fontFamily }: { target
   );
 };
 
-const Modal = ({ isOpen, result, isWinner, onClose, fontFamily }: { isOpen: boolean, result: string, isWinner: boolean, onClose: () => void, fontFamily: string }) => {
+const Modal = ({ isOpen, result, resultName, isWinner, onClose, fontFamily }: { key?: React.Key, isOpen: boolean, result: string, resultName: string, isWinner: boolean, onClose: () => void, fontFamily: string }) => {
   useEffect(() => {
     if (isOpen && isWinner) {
       const duration = 3 * 1000;
@@ -193,20 +194,30 @@ const Modal = ({ isOpen, result, isWinner, onClose, fontFamily }: { isOpen: bool
               )}
 
               <h2 className={cn(
-                "text-4xl font-black uppercase tracking-wider mb-2",
+                "text-4xl md:text-5xl font-black uppercase tracking-wider mb-2 mt-4",
                 isWinner ? "text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-cyan-300" : "text-slate-300"
               )}>
                 {isWinner ? "¡Tenemos Ganador!" : "¡Al Agua!"}
               </h2>
               
-              <p className="text-slate-400 mb-8 text-lg">
-                {isWinner ? "El número afortunado es:" : "Sigue intentando, este número no gana."}
+              <p className="text-slate-400 mb-4 text-lg">
+                {isWinner ? "Felicidades a:" : "Sigue intentando:"}
+              </p>
+
+              {resultName && (
+                <div className="text-3xl md:text-5xl font-bold text-white mb-6 uppercase tracking-wide leading-tight px-4 break-words">
+                  {resultName}
+                </div>
+              )}
+
+              <p className="text-slate-500 mb-2 text-sm uppercase tracking-[0.2em]">
+                Ticket Número
               </p>
 
               <div className={cn(
-                "text-8xl font-black tracking-widest mb-10 py-4 px-8 rounded-2xl border-2",
+                "text-7xl md:text-8xl font-black tracking-widest mb-8 py-4 px-8 rounded-2xl border-2 inline-block",
                 isWinner 
-                  ? "text-white border-blue-500/50 bg-blue-900/30 shadow-[inset_0_0_20px_rgba(59,130,246,0.5)]" 
+                  ? "text-white border-blue-500/50 bg-blue-900/30 shadow-[inset_0_0_30px_rgba(59,130,246,0.5)]" 
                   : "text-slate-400 border-slate-700 bg-slate-800/50"
               )} style={{ fontFamily: fontFamily }}>
                 {result}
@@ -233,19 +244,43 @@ const Modal = ({ isOpen, result, isWinner, onClose, fontFamily }: { isOpen: bool
 
 export default function App() {
   const [showConfig, setShowConfig] = useState(false);
-  const [config, setConfig] = useState({
-    spinTime: 4000,
-    maxTickets: 350,
-    waterDraws: 3, // Number of losers before winner
-    fontFamily: "'Orbitron', sans-serif"
+  
+  const [participants, setParticipants] = useState<{ nombre: string, numero: string }[]>(() => {
+    try {
+      const saved = localStorage.getItem('sorteo_participants');
+      return saved ? JSON.parse(saved) : [];
+    } catch (e) {
+      return [];
+    }
   });
+
+  useEffect(() => {
+    localStorage.setItem('sorteo_participants', JSON.stringify(participants));
+  }, [participants]);
+
+  const [config, setConfig] = useState<{spinTime: number, waterDraws: number, fontFamily: string}>(() => {
+    try {
+      const saved = localStorage.getItem('sorteo_config');
+      if (saved) return JSON.parse(saved);
+    } catch (e) {}
+    return {
+      spinTime: 4000,
+      waterDraws: 3, // Number of losers before winner
+      fontFamily: "'Orbitron', sans-serif"
+    };
+  });
+
+  useEffect(() => {
+    localStorage.setItem('sorteo_config', JSON.stringify(config));
+  }, [config]);
 
   const [currentDrawCount, setCurrentDrawCount] = useState(0);
   const [isSpinning, setIsSpinning] = useState(false);
   const [resultNumber, setResultNumber] = useState("000");
+  const [resultName, setResultName] = useState("");
   const [showModal, setShowModal] = useState(false);
   const [isWinner, setIsWinner] = useState(false);
-  const [drawnTickets, setDrawnTickets] = useState<{number: string, type: 'agua' | 'winner'}[]>([]);
+  const [drawnTickets, setDrawnTickets] = useState<{number: string, name: string, type: 'agua' | 'winner'}[]>([]);
   const [audioCtx, setAudioCtx] = useState<AudioContext | null>(null);
 
   // Audio effect for spinning
@@ -301,9 +336,79 @@ export default function App() {
     return audioCtx;
   };
 
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      const bstr = evt.target?.result;
+      const wb = XLSX.read(bstr, { type: 'binary' });
+      const wsname = wb.SheetNames[0];
+      const ws = wb.Sheets[wsname];
+      const data = XLSX.utils.sheet_to_json<any>(ws);
+
+      const parsedParticipants: {nombre: string, numero: string}[] = [];
+
+      data.forEach((row) => {
+        const keys = Object.keys(row);
+        let nombreKey = keys.find(k => k.toLowerCase().includes('nombre') || k.toLowerCase().includes('participante'));
+        let numeroKey = keys.find(k => k.toLowerCase().includes('numero') || k.toLowerCase().includes('número') || k.toLowerCase().includes('ticket') || k.toLowerCase().includes('boleto'));
+
+        if (!nombreKey && keys.length >= 1) nombreKey = keys[0];
+        if (!numeroKey && keys.length >= 2) numeroKey = keys[1];
+
+        // Advanced heuristic if columns are just something like [0] and [1] with no headers
+        if (keys.length >= 2 && nombreKey && numeroKey) {
+            const val1 = String(row[nombreKey]).trim();
+            const val2 = String(row[numeroKey]).trim();
+            
+            // If the supposed 'nombre' is pure digits containing no letters, 
+            // and the 'numero' has letters, they are likely swapped.
+            if (/^\d+$/.test(val1) && /[a-zA-Z]/.test(val2)) {
+                let temp = nombreKey;
+                nombreKey = numeroKey;
+                numeroKey = temp;
+            }
+        }
+
+        if (nombreKey && numeroKey && row[nombreKey] && row[numeroKey]) {
+          parsedParticipants.push({
+            nombre: String(row[nombreKey]).trim(),
+            numero: String(row[numeroKey]).trim()
+          });
+        }
+      });
+
+      if (parsedParticipants.length > 0) {
+        setParticipants(parsedParticipants);
+        setDrawnTickets([]);
+        setCurrentDrawCount(0);
+        alert(`¡Se han cargado ${parsedParticipants.length} participantes exitosamente!`);
+      } else {
+        alert("No se purieron encontrar columnas de Nombre y Número en el Excel. Usa un Excel simple con encabezados 'Nombre' y 'Numero'.");
+      }
+    };
+    reader.readAsBinaryString(file);
+    e.target.value = '';
+  };
+
   const handleStart = () => {
     if (isSpinning) return;
     
+    if (participants.length === 0) {
+      alert("¡Por favor, carga un archivo Excel con los participantes primero en la configuración!");
+      setShowConfig(true);
+      return;
+    }
+
+    const availableParticipants = participants.filter(p => !drawnTickets.some(t => t.number === p.numero));
+
+    if (availableParticipants.length === 0) {
+      alert("¡Ya se sortearon todos los participantes de la lista!");
+      return;
+    }
+
     const ctx = initAudio();
     if (ctx && ctx.state === 'suspended') {
       ctx.resume();
@@ -312,22 +417,16 @@ export default function App() {
     setIsSpinning(true);
     setShowModal(false);
 
-    // Generate random number between 1 and maxTickets that hasn't been drawn
-    let randomNum;
-    let paddedNum;
-    let attempts = 0;
-    do {
-      randomNum = Math.floor(Math.random() * config.maxTickets) + 1;
-      paddedNum = randomNum.toString().padStart(3, '0');
-      attempts++;
-      if (attempts > 2000) {
-        alert("¡Ya se sortearon todos los tickets posibles!");
-        setIsSpinning(false);
-        return;
-      }
-    } while (drawnTickets.some(t => t.number === paddedNum));
+    // Pick random participant
+    const randomIndex = Math.floor(Math.random() * availableParticipants.length);
+    const chosenParticipant = availableParticipants[randomIndex];
+    
+    // Default pad to 3 length, or more if participants have larger numbers
+    const maxLength = Math.max(3, ...participants.map(p => p.numero.length));
+    const paddedNum = chosenParticipant.numero.padStart(maxLength, '0');
     
     setResultNumber(paddedNum);
+    setResultName(chosenParticipant.nombre);
 
     // Determine if winner
     const willBeWinner = currentDrawCount >= config.waterDraws;
@@ -337,16 +436,15 @@ export default function App() {
       setIsSpinning(false);
       setIsWinner(willBeWinner);
       
-      setDrawnTickets(prev => [...prev, { number: paddedNum, type: willBeWinner ? 'winner' : 'agua' }]);
+      setDrawnTickets(prev => [...prev, { number: paddedNum, name: chosenParticipant.nombre, type: willBeWinner ? 'winner' : 'agua' }]);
       
       if (willBeWinner) {
         setShowModal(true);
-        // Reset for next round of drawings if needed, or keep it
         setCurrentDrawCount(0);
       } else {
         setCurrentDrawCount(prev => prev + 1);
       }
-    }, config.spinTime + 1000); // Add max delay of last reel
+    }, config.spinTime + 1000); 
   };
 
   return (
@@ -391,10 +489,14 @@ export default function App() {
               drawnTickets.filter(t => t.type === 'agua').map((ticket, idx) => (
                 <div 
                   key={idx}
-                  className="flex items-center justify-center px-4 py-3 rounded-xl text-4xl font-black bg-slate-800/80 border border-slate-600 text-slate-500 shadow-inner line-through decoration-red-500/70 decoration-4"
-                  style={{ fontFamily: config.fontFamily }}
+                  className="flex flex-col items-center justify-center px-4 py-3 rounded-xl bg-slate-800/80 border border-slate-600 shadow-inner"
                 >
-                  {ticket.number}
+                  <div className="text-3xl font-black text-slate-500 line-through decoration-red-500/70 decoration-4" style={{ fontFamily: config.fontFamily }}>
+                    {ticket.number}
+                  </div>
+                  <div className="text-xs text-slate-400 font-bold uppercase truncate w-full text-center mt-1" title={ticket.name}>
+                    {ticket.name}
+                  </div>
                 </div>
               ))
             )}
@@ -411,9 +513,9 @@ export default function App() {
 
         {/* Slot Machine Container */}
         <div className="flex gap-4 md:gap-8 mb-16 p-8 rounded-3xl bg-slate-900/40 backdrop-blur-md border border-blue-500/20 shadow-[0_0_50px_rgba(0,0,0,0.5)]">
-          <Reel targetDigit={resultNumber[0]} isSpinning={isSpinning} spinTime={config.spinTime} delay={0} fontFamily={config.fontFamily} />
-          <Reel targetDigit={resultNumber[1]} isSpinning={isSpinning} spinTime={config.spinTime} delay={400} fontFamily={config.fontFamily} />
-          <Reel targetDigit={resultNumber[2]} isSpinning={isSpinning} spinTime={config.spinTime} delay={800} fontFamily={config.fontFamily} />
+          {resultNumber.split('').map((digit, i) => (
+             <Reel key={i} targetDigit={digit} isSpinning={isSpinning} spinTime={config.spinTime} delay={i * 400} fontFamily={config.fontFamily} />
+          ))}
         </div>
 
         {/* Start Button */}
@@ -469,16 +571,33 @@ export default function App() {
 
             <div className="p-6 flex-1 overflow-y-auto space-y-8">
               <div className="space-y-4">
-                <label className="block">
-                  <span className="text-sm font-medium text-slate-300 mb-1 block">Cantidad de Tickets (Rifas)</span>
-                  <input 
-                    type="number" 
-                    value={config.maxTickets}
-                    onChange={(e) => setConfig({...config, maxTickets: parseInt(e.target.value) || 1})}
-                    className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  />
-                  <p className="text-xs text-slate-500 mt-2">El número ganador será entre 1 y {config.maxTickets}.</p>
-                </label>
+                
+                {/* Excel Upload Area */}
+                <div className="p-5 rounded-xl bg-slate-800/80 border border-blue-500/30 mb-6">
+                  <h3 className="text-sm font-bold text-blue-400 mb-3 flex items-center gap-2">
+                    <Users className="w-5 h-5" />
+                    Participantes: {participants.length}
+                  </h3>
+                  <label className="flex flex-col items-center justify-center w-full min-h-[120px] border-2 border-dashed border-blue-500/40 hover:border-blue-400/80 rounded-xl cursor-pointer bg-slate-900/50 hover:bg-slate-800 transition-all group p-4">
+                    <Upload className="w-8 h-8 text-blue-400 mb-2 group-hover:scale-110 transition-transform" />
+                    <span className="text-sm font-bold text-slate-200">Subir listado en Excel</span>
+                    <span className="text-xs text-slate-500 mt-1 text-center">Formato: Archivo .xlsx o .xls<br />Columnas recomendadas: Nombre, Numero</span>
+                    <input type="file" accept=".xlsx, .xls" onChange={handleFileUpload} className="hidden" />
+                  </label>
+                  
+                  {participants.length > 0 && (
+                     <button onClick={() => {
+                        if(window.confirm('¿Estás seguro de borrar todos los participantes?')) { 
+                          setParticipants([]); 
+                          setDrawnTickets([]);
+                          setCurrentDrawCount(0);
+                        }
+                       }} className="mt-4 flex items-center justify-center gap-2 w-full py-2.5 rounded-lg bg-red-900/30 text-red-400 border border-red-900/50 text-xs font-bold hover:bg-red-900/50 transition-colors uppercase tracking-wider">
+                       <Trash2 className="w-4 h-4" />
+                       Limpiar Lista
+                     </button>
+                  )}
+                </div>
 
                 <label className="block">
                   <span className="text-sm font-medium text-slate-300 mb-1 block">Tiempo de Giro (ms)</span>
@@ -556,6 +675,7 @@ export default function App() {
       <Modal 
         isOpen={showModal} 
         result={resultNumber} 
+        resultName={resultName}
         isWinner={isWinner} 
         onClose={() => setShowModal(false)} 
         fontFamily={config.fontFamily}
